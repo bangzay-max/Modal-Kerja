@@ -276,7 +276,74 @@ function LabelOnlyRow({ label, dates, band }) {
   );
 }
 
+function ManualDateForm({ fields, allDates, manualData, onSave }) {
+  function draftFor(d) {
+    const base = manualData[d] || {};
+    const out = {};
+    fields.forEach((f) => (out[f.id] = base[f.id] ?? ""));
+    return out;
+  }
+
+  const [date, setDate] = useState(allDates[0] || "");
+  const [draft, setDraft] = useState(() => draftFor(allDates[0] || ""));
+  const [savedMsg, setSavedMsg] = useState("");
+
+  useEffect(() => {
+    if (allDates.length > 0 && !allDates.includes(date)) {
+      setDate(allDates[0]);
+      setDraft(draftFor(allDates[0]));
+      setSavedMsg("");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allDates.join(",")]);
+
+  if (allDates.length === 0) return null;
+
+  function handleDateChange(newDate) {
+    setDate(newDate);
+    setDraft(draftFor(newDate));
+    setSavedMsg("");
+  }
+
+  function handleSave() {
+    onSave(date, draft);
+    setSavedMsg("Tersimpan ke " + formatDateLabel(date));
+  }
+
+  return (
+    <div className="mk-single-form">
+      <div className="mk-single-form-head">
+        <label>Tanggal</label>
+        <select value={date} onChange={(e) => handleDateChange(e.target.value)}>
+          {allDates.map((d) => (
+            <option key={d} value={d}>
+              {formatDateLabel(d)}
+            </option>
+          ))}
+        </select>
+        <button className="mk-single-save" onClick={handleSave}>
+          Simpan
+        </button>
+        {savedMsg && <span className="mk-single-saved-msg">{savedMsg}</span>}
+      </div>
+      <div className="mk-single-form-grid">
+        {fields.map((f) => (
+          <div className="mk-manual-field" key={f.id}>
+            <label>{f.label}</label>
+            <input
+              type="number"
+              value={draft[f.id] ?? ""}
+              onChange={(e) => setDraft((prev) => ({ ...prev, [f.id]: e.target.value }))}
+            />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ---------- main component ----------
+
 
 export default function ModalKerjaPrototype() {
   const [clusters, setClusters] = useState(["EJ Makassar Greater"]);
@@ -354,6 +421,13 @@ export default function ModalKerjaPrototype() {
     updateCluster((c) => ({
       ...c,
       manual: { ...c.manual, [key]: { ...(c.manual[key] || {}), [field]: value } },
+    }));
+  }
+
+  function saveManualFields(dateKeyStr, fieldsObj) {
+    updateCluster((c) => ({
+      ...c,
+      manual: { ...c.manual, [dateKeyStr]: { ...(c.manual[dateKeyStr] || {}), ...fieldsObj } },
     }));
   }
 
@@ -662,6 +736,15 @@ export default function ModalKerjaPrototype() {
 
         .mk-empty { color: var(--ink-text-dim); font-size: 13px; padding: 30px 4px; }
 
+        .mk-single-form { background: var(--paper); border: 1px solid var(--rule-soft); border-radius: 4px; padding: 16px 18px; margin-bottom: 10px; }
+        .mk-single-form-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px dashed var(--rule-soft); }
+        .mk-single-form-head label { font-size: 12px; color: #524646; }
+        .mk-single-form-head select { background: var(--paper-2); border: 1px solid var(--rule-soft); color: #524646; font-family: 'IBM Plex Mono', monospace; font-size: 13px; padding: 6px 8px; border-radius: 3px; }
+        .mk-single-save { background: var(--accent); color: #fcf2e5; border: none; padding: 7px 16px; border-radius: 3px; font-size: 13px; font-weight: 600; cursor: pointer; }
+        .mk-single-save:hover { background: var(--accent-deep); }
+        .mk-single-saved-msg { font-size: 12px; color: var(--slate); font-style: italic; }
+        .mk-single-form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+
         .mk-save-status { font-size: 11.5px; color: var(--ink-text-dim); font-family: 'IBM Plex Mono', monospace; }
         .mk-save-status b { color: var(--ink-text); font-family: 'Inter', sans-serif; }
 
@@ -817,89 +900,13 @@ export default function ModalKerjaPrototype() {
 
               {allDates.length > 0 && (
                 <>
-                  <div className="mk-section-title">
-                    Selisih_Kurang &amp; Selisih_Lebih — rincian per hari
-                  </div>
-
-                  <div className="mk-toolbar">
-                    <div className="mk-toolbar-range">
-                      <label>Dari</label>
-                      <input
-                        type="date"
-                        value={rangeFrom}
-                        onChange={(e) => {
-                          setRangeFrom(e.target.value);
-                          setPage(0);
-                        }}
-                      />
-                      <label>Sampai</label>
-                      <input
-                        type="date"
-                        value={rangeTo}
-                        onChange={(e) => {
-                          setRangeTo(e.target.value);
-                          setPage(0);
-                        }}
-                      />
-                      {(rangeFrom || rangeTo) && (
-                        <button
-                          className="mk-toolbar-reset"
-                          onClick={() => {
-                            setRangeFrom("");
-                            setRangeTo("");
-                            setPage(0);
-                          }}
-                        >
-                          Reset filter
-                        </button>
-                      )}
-                    </div>
-                    <div className="mk-toolbar-pager">
-                      <button disabled={safePage === 0} onClick={() => setPage(safePage - 1)}>
-                        &larr; Sebelumnya
-                      </button>
-                      <span>
-                        {rangeFilteredDates.length === 0
-                          ? "Tidak ada tanggal"
-                          : `${formatDateLabel(visibleDates[0])} – ${formatDateLabel(visibleDates[visibleDates.length - 1])} · hal ${safePage + 1}/${totalPages}`}
-                      </span>
-                      <button disabled={safePage >= totalPages - 1} onClick={() => setPage(safePage + 1)}>
-                        Berikutnya &rarr;
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="mk-manual-grid">
-                    {visibleDates.map((d) => (
-                      <div className="mk-manual-cell" key={d}>
-                        <div className="mk-manual-date">{formatDateLabel(d)}</div>
-
-                        <div className="mk-manual-subhead">Rincian Selisih Kurang</div>
-                        {KURANG_FIELDS.map((f) => (
-                          <div className="mk-manual-field" key={f.id}>
-                            <label>{f.label}</label>
-                            <input
-                              type="number"
-                              value={cData.manual[d]?.[f.id] ?? ""}
-                              onChange={(ev) => setManual(d, f.id, ev.target.value)}
-                            />
-                          </div>
-                        ))}
-
-                        <div className="mk-manual-subhead">Rincian Selisih Lebih</div>
-                        {LEBIH_FIELDS.map((f) => (
-                          <div className="mk-manual-field" key={f.id}>
-                            <label>{f.label}</label>
-                            <input
-                              type="number"
-                              value={cData.manual[d]?.[f.id] ?? ""}
-                              onChange={(ev) => setManual(d, f.id, ev.target.value)}
-                            />
-                          </div>
-                        ))}
-                      </div>
-                    ))}
-                  </div>
+                  <div className="mk-section-title">Selisih_Kurang &amp; Selisih_Lebih</div>
+                  <ManualDateForm
+                    fields={[...KURANG_FIELDS, ...LEBIH_FIELDS]}
+                    allDates={allDates}
+                    manualData={cData.manual}
+                    onSave={(date, draft) => saveManualFields(date, draft)}
+                  />
                 </>
               )}
 
@@ -961,27 +968,13 @@ export default function ModalKerjaPrototype() {
 
               {allDates.length > 0 && (
                 <>
-                  <div className="mk-section-title">
-                    Input manual per hari — Stock &amp; Digital
-                  </div>
-
-                  <div className="mk-manual-grid">
-                    {visibleDates.map((d) => (
-                      <div className="mk-manual-cell" key={d}>
-                        <div className="mk-manual-date">{formatDateLabel(d)}</div>
-                        {MANUAL_ELEMENTS.map((e) => (
-                          <div className="mk-manual-field" key={e.id}>
-                            <label>{e.label}</label>
-                            <input
-                              type="number"
-                              value={cData.manual[d]?.[e.id] ?? ""}
-                              onChange={(ev) => setManual(d, e.id, ev.target.value)}
-                            />
-                          </div>
-                        ))}
-                      </div>
-                    ))}
-                  </div>
+                  <div className="mk-section-title">Input Manual — Stock &amp; Digital</div>
+                  <ManualDateForm
+                    fields={MANUAL_ELEMENTS}
+                    allDates={allDates}
+                    manualData={cData.manual}
+                    onSave={(date, draft) => saveManualFields(date, draft)}
+                  />
                 </>
               )}
             </div>
