@@ -781,6 +781,94 @@ export default function ModalKerjaPrototype() {
                 </div>
               </div>
 
+              {allDates.length > 0 && (
+                <>
+                  <div className="mk-section-title">
+                    Selisih_Kurang &amp; Selisih_Lebih — rincian per hari
+                  </div>
+
+                  <div className="mk-toolbar">
+                    <div className="mk-toolbar-range">
+                      <label>Dari</label>
+                      <input
+                        type="date"
+                        value={rangeFrom}
+                        onChange={(e) => {
+                          setRangeFrom(e.target.value);
+                          setPage(0);
+                        }}
+                      />
+                      <label>Sampai</label>
+                      <input
+                        type="date"
+                        value={rangeTo}
+                        onChange={(e) => {
+                          setRangeTo(e.target.value);
+                          setPage(0);
+                        }}
+                      />
+                      {(rangeFrom || rangeTo) && (
+                        <button
+                          className="mk-toolbar-reset"
+                          onClick={() => {
+                            setRangeFrom("");
+                            setRangeTo("");
+                            setPage(0);
+                          }}
+                        >
+                          Reset filter
+                        </button>
+                      )}
+                    </div>
+                    <div className="mk-toolbar-pager">
+                      <button disabled={safePage === 0} onClick={() => setPage(safePage - 1)}>
+                        &larr; Sebelumnya
+                      </button>
+                      <span>
+                        {rangeFilteredDates.length === 0
+                          ? "Tidak ada tanggal"
+                          : `${formatDateLabel(visibleDates[0])} – ${formatDateLabel(visibleDates[visibleDates.length - 1])} · hal ${safePage + 1}/${totalPages}`}
+                      </span>
+                      <button disabled={safePage >= totalPages - 1} onClick={() => setPage(safePage + 1)}>
+                        Berikutnya &rarr;
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="mk-manual-grid">
+                    {visibleDates.map((d) => (
+                      <div className="mk-manual-cell" key={d}>
+                        <div className="mk-manual-date">{formatDateLabel(d)}</div>
+
+                        <div className="mk-manual-subhead">Rincian Selisih Kurang</div>
+                        {KURANG_FIELDS.map((f) => (
+                          <div className="mk-manual-field" key={f.id}>
+                            <label>{f.label}</label>
+                            <input
+                              type="number"
+                              value={cData.manual[d]?.[f.id] ?? ""}
+                              onChange={(ev) => setManual(d, f.id, ev.target.value)}
+                            />
+                          </div>
+                        ))}
+
+                        <div className="mk-manual-subhead">Rincian Selisih Lebih</div>
+                        {LEBIH_FIELDS.map((f) => (
+                          <div className="mk-manual-field" key={f.id}>
+                            <label>{f.label}</label>
+                            <input
+                              type="number"
+                              value={cData.manual[d]?.[f.id] ?? ""}
+                              onChange={(ev) => setManual(d, f.id, ev.target.value)}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+
               <div className="mk-section-title">Order Log</div>
               <div className="mk-grid">
                 {ORDER_LOG_SLOTS.map((slot) => (
@@ -840,55 +928,7 @@ export default function ModalKerjaPrototype() {
               {allDates.length > 0 && (
                 <>
                   <div className="mk-section-title">
-                    Input manual per hari — Stock &amp; Digital, plus rincian selisih
-                  </div>
-
-                  <div className="mk-toolbar">
-                    <div className="mk-toolbar-range">
-                      <label>Dari</label>
-                      <input
-                        type="date"
-                        value={rangeFrom}
-                        onChange={(e) => {
-                          setRangeFrom(e.target.value);
-                          setPage(0);
-                        }}
-                      />
-                      <label>Sampai</label>
-                      <input
-                        type="date"
-                        value={rangeTo}
-                        onChange={(e) => {
-                          setRangeTo(e.target.value);
-                          setPage(0);
-                        }}
-                      />
-                      {(rangeFrom || rangeTo) && (
-                        <button
-                          className="mk-toolbar-reset"
-                          onClick={() => {
-                            setRangeFrom("");
-                            setRangeTo("");
-                            setPage(0);
-                          }}
-                        >
-                          Reset filter
-                        </button>
-                      )}
-                    </div>
-                    <div className="mk-toolbar-pager">
-                      <button disabled={safePage === 0} onClick={() => setPage(safePage - 1)}>
-                        &larr; Sebelumnya
-                      </button>
-                      <span>
-                        {rangeFilteredDates.length === 0
-                          ? "Tidak ada tanggal"
-                          : `${formatDateLabel(visibleDates[0])} – ${formatDateLabel(visibleDates[visibleDates.length - 1])} · hal ${safePage + 1}/${totalPages}`}
-                      </span>
-                      <button disabled={safePage >= totalPages - 1} onClick={() => setPage(safePage + 1)}>
-                        Berikutnya &rarr;
-                      </button>
-                    </div>
+                    Input manual per hari — Stock &amp; Digital
                   </div>
 
                   <div className="mk-manual-grid">
@@ -902,30 +942,6 @@ export default function ModalKerjaPrototype() {
                               type="number"
                               value={cData.manual[d]?.[e.id] ?? ""}
                               onChange={(ev) => setManual(d, e.id, ev.target.value)}
-                            />
-                          </div>
-                        ))}
-
-                        <div className="mk-manual-subhead">Rincian Selisih Kurang</div>
-                        {KURANG_FIELDS.map((f) => (
-                          <div className="mk-manual-field" key={f.id}>
-                            <label>{f.label}</label>
-                            <input
-                              type="number"
-                              value={cData.manual[d]?.[f.id] ?? ""}
-                              onChange={(ev) => setManual(d, f.id, ev.target.value)}
-                            />
-                          </div>
-                        ))}
-
-                        <div className="mk-manual-subhead">Rincian Selisih Lebih</div>
-                        {LEBIH_FIELDS.map((f) => (
-                          <div className="mk-manual-field" key={f.id}>
-                            <label>{f.label}</label>
-                            <input
-                              type="number"
-                              value={cData.manual[d]?.[f.id] ?? ""}
-                              onChange={(ev) => setManual(d, f.id, ev.target.value)}
                             />
                           </div>
                         ))}
