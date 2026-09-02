@@ -375,6 +375,40 @@ export default function ModalKerjaPrototype() {
   const hasData = allDates.length > 0;
   const calcDates = hasData ? allDates : [dateKey(new Date())];
 
+  // restore this cluster's most recent saved worksheet from Supabase on
+  // first load / cluster switch, if there's nothing local yet — otherwise
+  // every page refresh looks "empty" even though data was saved.
+  const [restoreDone, setRestoreDone] = useState({});
+  useEffect(() => {
+    if (restoreDone[activeCluster]) return;
+    const isEmpty =
+      Object.keys(cData.orderLogFiles).length === 0 &&
+      Object.keys(cData.banks).length === 0 &&
+      !cData.xendit.fileName &&
+      Object.keys(cData.manual).length === 0;
+    if (!isEmpty) {
+      setRestoreDone((prev) => ({ ...prev, [activeCluster]: true }));
+      return;
+    }
+    (async () => {
+      try {
+        const res = await storage.list("mk:" + activeCluster + ":", false);
+        const keys = res?.keys || [];
+        if (keys.length > 0) {
+          const latest = keys.slice().sort().pop();
+          const got = await storage.get("mk:" + activeCluster + ":" + latest, false);
+          const parsed = JSON.parse(got.value);
+          updateCluster(() => parsed);
+          setSaveStatus("Data dimuat dari Supabase (" + formatMonthLabel(latest) + ")");
+        }
+      } catch (err) {
+        // belum ada data tersimpan untuk cluster ini — biarkan kosong
+      }
+      setRestoreDone((prev) => ({ ...prev, [activeCluster]: true }));
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCluster]);
+
   // init activePeriod as soon as the cluster has its first date
   useEffect(() => {
     if (!cData.activePeriod && allDates.length > 0) {
