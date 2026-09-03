@@ -354,14 +354,12 @@ function ManualDateForm({ fields, allDates, manualData, onSave }) {
 
 
 export default function ModalKerjaPrototype() {
-  const [clusters, setClusters] = useState(["EJ Makassar Greater"]);
-  const [activeCluster, setActiveCluster] = useState("EJ Makassar Greater");
+  const [clusters, setClusters] = useState([]);
+  const [activeCluster, setActiveCluster] = useState(null);
   const [newCluster, setNewCluster] = useState("");
   const [tab, setTab] = useState("upload");
 
-  const [store, setStore] = useState({
-    "EJ Makassar Greater": emptyCluster(),
-  });
+  const [store, setStore] = useState({});
 
   const [newBankName, setNewBankName] = useState("");
   const [bankNames, setBankNames] = useState(["BCA", "BRI"]);
@@ -410,7 +408,7 @@ export default function ModalKerjaPrototype() {
   const [viewingData, setViewingData] = useState(null);
   const [viewingLoading, setViewingLoading] = useState(false);
 
-  const cData = store[activeCluster];
+  const cData = store[activeCluster] || emptyCluster();
 
   function updateCluster(fn) {
     setStore((prev) => ({ ...prev, [activeCluster]: fn(prev[activeCluster]) }));
@@ -493,6 +491,7 @@ export default function ModalKerjaPrototype() {
   // every page refresh looks "empty" even though data was saved.
   const [restoreDone, setRestoreDone] = useState({});
   useEffect(() => {
+    if (!activeCluster) return;
     if (restoreDone[activeCluster]) return;
     const isEmpty =
       Object.keys(cData.orderLogFiles).length === 0 &&
@@ -778,6 +777,8 @@ export default function ModalKerjaPrototype() {
         .mk-grand-total td.lr-label { background: #f5e6d0; }
 
         .mk-empty { color: var(--ink-text-dim); font-size: 13px; padding: 30px 4px; }
+        .mk-empty-cluster { padding: 40px 4px; }
+        .mk-empty-cluster .mk-sub { margin-top: 8px; margin-bottom: 0; max-width: 480px; }
 
         .mk-single-form { background: var(--paper); border: 1px solid var(--rule-soft); border-radius: 4px; padding: 16px 18px; margin-bottom: 10px; }
         .mk-single-form-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px dashed var(--rule-soft); }
@@ -845,15 +846,18 @@ export default function ModalKerjaPrototype() {
               </button>
             </div>
           </div>
-
-          <div className="mk-note">
-            Prototipe — data tersimpan hanya selama sesi ini di browser. Versi
-            produksi perlu backend + database supaya admin tiap cluster bisa
-            input harian dan riwayat tiap bulan tersimpan permanen.
-          </div>
         </aside>
 
         <main className="mk-main">
+          {!activeCluster ? (
+            <div className="mk-empty-cluster">
+              <div className="mk-h1">Belum ada cluster</div>
+              <div className="mk-sub">
+                Tambahkan cluster pertama lewat kolom "Tambah cluster..." di sidebar kiri untuk mulai input data.
+              </div>
+            </div>
+          ) : (
+            <>
           <div className="mk-header">
             <div className="mk-h1">{activeCluster}</div>
             {cData.activePeriod && (
@@ -1331,6 +1335,8 @@ export default function ModalKerjaPrototype() {
                 </>
               )}
             </div>
+          )}
+            </>
           )}
         </main>
       </div>
