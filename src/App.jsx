@@ -372,9 +372,24 @@ export default function ModalKerjaPrototype() {
         if (Array.isArray(list) && list.length > 0) {
           setClusters(list);
           setActiveCluster((prev) => prev || list[0]);
+          return;
         }
       } catch (err) {
-        // belum ada cluster yang pernah disimpan
+        // belum ada daftar cluster tersimpan — coba tebak dari data lama di bawah
+      }
+      // fallback: rekonstruksi daftar cluster dari key data "mk:<cluster>:<periode>"
+      // yang sudah tersimpan sebelum daftar cluster ini ada (data lama).
+      try {
+        const res2 = await storage.list("mk:", false);
+        const keys = res2?.keys || [];
+        const names = Array.from(new Set(keys.map((k) => k.split(":")[1]).filter(Boolean)));
+        if (names.length > 0) {
+          setClusters(names);
+          setActiveCluster((prev) => prev || names[0]);
+          storage.set("_clusters", JSON.stringify(names), false).catch(() => {});
+        }
+      } catch (err) {
+        // tidak ada data tersimpan sama sekali — mulai kosong
       }
     })();
   }, []);
