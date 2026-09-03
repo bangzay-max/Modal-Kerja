@@ -544,6 +544,7 @@ export default function ModalKerjaPrototype() {
           const got = await storage.get("mk:" + activeCluster + ":" + latest, false);
           const parsed = JSON.parse(got.value);
           updateCluster(() => parsed);
+          setOpeningDraft(parsed.opening || emptyOpening());
           setSaveStatus("Data dimuat dari Supabase (" + formatMonthLabel(latest) + ")");
         }
       } catch (err) {
