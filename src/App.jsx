@@ -112,6 +112,56 @@ function parseXendit(rows) {
   return byDate;
 }
 
+function parseSettlement(rows) {
+  const byDate = {};
+  for (const row of rows) {
+    const dt = parseAnyDate(getField(row, ["Tanggal", "tanggal"]));
+    if (!dt) continue;
+    const key = dateKey(dt);
+    const rec = {
+      depo: getField(row, ["Depo", "DEPO", "City"]),
+      spv: getField(row, ["SPV"]),
+      userId: getField(row, ["User ID", "USER ID", "user id"]),
+      name: getField(row, ["Canvasser Name", "Nama Sales", "canvasser name"]),
+      multipayment: toNumber(getField(row, ["Multipayment"])),
+      cash: toNumber(getField(row, ["Cash"])),
+      total: toNumber(getField(row, ["Total"])),
+      bca: toNumber(getField(row, ["BCA"])),
+      bri: toNumber(getField(row, ["BRI"])),
+      bundling: toNumber(getField(row, ["Bundling"])),
+      kblb: toNumber(getField(row, ["KB/LB", "KB / LB"])),
+    };
+    if (!rec.userId && !rec.name) continue;
+    if (!byDate[key]) byDate[key] = [];
+    byDate[key].push(rec);
+  }
+  return byDate;
+}
+
+function aggregateSettlement(settlementByDate) {
+  const map = {};
+  Object.values(settlementByDate || {}).forEach((rows) => {
+    rows.forEach((r) => {
+      const key = (r.userId || "") + "|" + r.name;
+      if (!map[key]) {
+        map[key] = {
+          depo: r.depo,
+          spv: r.spv,
+          userId: r.userId,
+          name: r.name,
+          totalTagihan: 0,
+          totalBank: 0,
+        };
+      }
+      map[key].totalTagihan += r.total;
+      map[key].totalBank += r.bca + r.bri + r.bundling + r.kblb;
+    });
+  });
+  return Object.values(map)
+    .map((s) => ({ ...s, selisih: s.totalBank - s.totalTagihan }))
+    .sort((a, b) => (a.depo || "").localeCompare(b.depo || "") || (a.name || "").localeCompare(b.name || ""));
+}
+
 // ---------- config ----------
 
 const ORDER_LOG_SLOTS = [
@@ -171,6 +221,8 @@ function emptyCluster() {
     orderLogFiles: {},
     banks: {},
     xendit: { byDate: {}, fileName: null, rowCount: 0 },
+    settlement: {},
+    settlementFile: null,
     manual: {},
     opening: emptyOpening(),
     activePeriod: null,
@@ -502,6 +554,23 @@ export default function ModalKerjaPrototype() {
     });
   }
 
+  function handleSettlementFile(file) {
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: (res) => {
+        const byDate = parseSettlement(res.data);
+        // file settlement biasanya snapshot 1 hari — gabung ke tanggal yang sudah
+        // ada, jangan timpa tanggal lain yang sudah pernah diunggah sebelumnya.
+        updateCluster((c) => ({
+          ...c,
+          settlement: { ...c.settlement, ...byDate },
+          settlementFile: { name: file.name, rows: res.data.length },
+        }));
+      },
+    });
+  }
+
   function setManual(key, field, value) {
     updateCluster((c) => ({
       ...c,
@@ -713,6 +782,19 @@ export default function ModalKerjaPrototype() {
   });
 
   const bankList = Object.keys(cData.banks);
+  const settlementRows = aggregateSettlement(cData.settlement);
+  const settlementDetailRows = [];
+  Object.entries(cData.settlement || {}).forEach(([date, rows]) => {
+    if (rangeFrom && date < rangeFrom) return;
+    if (rangeTo && date > rangeTo) return;
+    rows.forEach((r) => {
+      const bankTotal = r.bca + r.bri + r.bundling + r.kblb;
+      settlementDetailRows.push({ date, ...r, bankTotal, selisih: bankTotal - r.total });
+    });
+  });
+  settlementDetailRows.sort(
+    (a, b) => a.date.localeCompare(b.date) || (a.depo || "").localeCompare(b.depo || "") || (a.name || "").localeCompare(b.name || "")
+  );
 
   const rangeFilteredDates = calcDates.filter((d) => {
     if (rangeFrom && d < rangeFrom) return false;
@@ -830,6 +912,10 @@ export default function ModalKerjaPrototype() {
         .mk-opening-subtotal { margin-top: 8px; display: flex; justify-content: space-between; font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; color: var(--ink-text-dim); }
         .mk-opening-save-row { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--rule-soft); display: flex; align-items: center; gap: 12px; }
         .mk-upload-save-hint { font-size: 11.5px; color: var(--ink-text-dim); line-height: 1.5; margin: 8px 0 26px; max-width: 640px; }
+        .mk-status-badge { display: inline-block; padding: 2px 9px; border-radius: 3px; font-size: 11px; font-weight: 600; font-family: 'Inter', sans-serif; }
+        .mk-status-lunas { background: var(--band-a); color: #524646; }
+        .mk-status-lebih-setor { background: var(--slate); color: #524646; }
+        .mk-status-kurang-setor { background: var(--band-c); color: #fcf2e5; }
 
         .mk-manual-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; margin-top: 10px; }
         .mk-manual-cell { background: var(--paper); border-radius: 4px; padding: 10px 11px; border: 1px solid var(--rule-soft); }
@@ -969,6 +1055,9 @@ export default function ModalKerjaPrototype() {
             </button>
             <button className={"mk-tab" + (tab === "modalKerja" ? " active" : "")} onClick={() => setTab("modalKerja")}>
               Modal Kerja
+            </button>
+            <button className={"mk-tab" + (tab === "rekapSales" ? " active" : "")} onClick={() => setTab("rekapSales")}>
+              Rekap Sales
             </button>
             <button
               className={"mk-tab" + (tab === "riwayat" ? " active" : "")}
@@ -1132,6 +1221,17 @@ export default function ModalKerjaPrototype() {
                 />
               </div>
 
+              <div className="mk-section-title">Detail Daily Settlement</div>
+              <div className="mk-grid">
+                <UploadCard
+                  title="Detail Daily Settlement per Sales"
+                  hint="Kolom wajib: Tanggal, Depo, SPV, User ID, Canvasser Name, Multipayment, Cash, Total, BCA, BRI, Bundling, KB/LB"
+                  fileName={cData.settlementFile?.name}
+                  rowCount={cData.settlementFile?.rows || 0}
+                  onFile={handleSettlementFile}
+                />
+              </div>
+
               <div className="mk-opening-save-row">
                 <button className="mk-single-save" onClick={handleSaveWorksheet}>
                   Simpan Data Upload Hari Ini
@@ -1141,7 +1241,8 @@ export default function ModalKerjaPrototype() {
               <div className="mk-upload-save-hint">
                 Setiap upload (Order Log, Mutasi Bank, Xendit) langsung menggantikan data lama di kartu yang sama —
                 kalau upload sore lebih lengkap dari pagi, tinggal upload ulang lalu klik Simpan di sini, tidak
-                perlu ulang dari awal.
+                perlu ulang dari awal. Khusus Detail Daily Settlement, tiap upload digabung per tanggal (bukan
+                menimpa), jadi aman upload beda tanggal secara terpisah.
               </div>
 
               {allDates.length > 0 && (
@@ -1358,6 +1459,149 @@ export default function ModalKerjaPrototype() {
                 Total memakai saldo hari terakhir yang datanya tersedia — angka ini yang jadi acuan opening bulan
                 berikutnya.
               </div>
+            </div>
+          )}
+
+          {tab === "rekapSales" && (
+            <div>
+              {settlementRows.length === 0 ? (
+                <div className="mk-empty">
+                  Belum ada data Detail Daily Settlement. Unggah lewat kartu "Detail Daily Settlement per Sales" di
+                  tab Unggah Data.
+                </div>
+              ) : (
+                <>
+                  <div className="mk-section-title">Rekap per Sales — akumulasi semua tanggal yang diunggah</div>
+                  <div className="mk-table-wrap">
+                    <table className="mk-ledger">
+                      <thead>
+                        <tr>
+                          <th>Depo</th>
+                          <th>SPV</th>
+                          <th>User ID</th>
+                          <th>Nama Sales</th>
+                          <th>Total Tagihan</th>
+                          <th>Total Mutasi Bank</th>
+                          <th>Selisih</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {settlementRows.map((s) => {
+                          const status = s.selisih === 0 ? "Lunas" : s.selisih > 0 ? "Lebih Setor" : "Kurang Setor";
+                          return (
+                            <tr key={s.userId + "|" + s.name} className="lrow">
+                              <td className="lr-label">{s.depo}</td>
+                              <td className="lr-val" style={{ textAlign: "left" }}>
+                                {s.spv}
+                              </td>
+                              <td className="lr-val" style={{ textAlign: "left" }}>
+                                {s.userId}
+                              </td>
+                              <td className="lr-val" style={{ textAlign: "left" }}>
+                                {s.name}
+                              </td>
+                              <td className="lr-val">{fmtRp(s.totalTagihan)}</td>
+                              <td className="lr-val">{fmtRp(s.totalBank)}</td>
+                              <td className={"lr-val " + (s.selisih < 0 ? "lr-neg" : s.selisih > 0 ? "lr-pos" : "")}>
+                                {fmtRp(s.selisih)}
+                              </td>
+                              <td className="lr-val">
+                                <span className={"mk-status-badge mk-status-" + status.replace(" ", "-").toLowerCase()}>
+                                  {status}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="mk-section-title">Detail Harian per Sales</div>
+                  <div className="mk-toolbar">
+                    <div className="mk-toolbar-range">
+                      <label>Dari</label>
+                      <input type="date" value={rangeFrom} onChange={(e) => setRangeFrom(e.target.value)} />
+                      <label>Sampai</label>
+                      <input type="date" value={rangeTo} onChange={(e) => setRangeTo(e.target.value)} />
+                      {(rangeFrom || rangeTo) && (
+                        <button
+                          className="mk-toolbar-reset"
+                          onClick={() => {
+                            setRangeFrom("");
+                            setRangeTo("");
+                          }}
+                        >
+                          Reset filter
+                        </button>
+                      )}
+                    </div>
+                    <span className="mk-toolbar-pager">{settlementDetailRows.length} baris</span>
+                  </div>
+                  <div className="mk-table-wrap">
+                    <table className="mk-ledger">
+                      <thead>
+                        <tr>
+                          <th>Tanggal</th>
+                          <th>Depo</th>
+                          <th>SPV</th>
+                          <th>User ID</th>
+                          <th>Nama Sales</th>
+                          <th>Multipayment</th>
+                          <th>Cash</th>
+                          <th>Total Tagihan</th>
+                          <th>BCA</th>
+                          <th>BRI</th>
+                          <th>Bundling</th>
+                          <th>KB/LB</th>
+                          <th>Total Bank</th>
+                          <th>Selisih</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {settlementDetailRows.map((r, i) => {
+                          const status = r.selisih === 0 ? "Lunas" : r.selisih > 0 ? "Lebih Setor" : "Kurang Setor";
+                          return (
+                            <tr key={i} className="lrow">
+                              <td className="lr-label">{formatDateLabel(r.date)}</td>
+                              <td className="lr-val" style={{ textAlign: "left" }}>
+                                {r.depo}
+                              </td>
+                              <td className="lr-val" style={{ textAlign: "left" }}>
+                                {r.spv}
+                              </td>
+                              <td className="lr-val" style={{ textAlign: "left" }}>
+                                {r.userId}
+                              </td>
+                              <td className="lr-val" style={{ textAlign: "left" }}>
+                                {r.name}
+                              </td>
+                              <td className="lr-val">{fmtRp(r.multipayment)}</td>
+                              <td className="lr-val">{fmtRp(r.cash)}</td>
+                              <td className="lr-val">{fmtRp(r.total)}</td>
+                              <td className="lr-val">{fmtRp(r.bca)}</td>
+                              <td className="lr-val">{fmtRp(r.bri)}</td>
+                              <td className="lr-val">{fmtRp(r.bundling)}</td>
+                              <td className="lr-val">{fmtRp(r.kblb)}</td>
+                              <td className="lr-val">{fmtRp(r.bankTotal)}</td>
+                              <td className={"lr-val " + (r.selisih < 0 ? "lr-neg" : r.selisih > 0 ? "lr-pos" : "")}>
+                                {fmtRp(r.selisih)}
+                              </td>
+                              <td className="lr-val">
+                                <span className={"mk-status-badge mk-status-" + status.replace(" ", "-").toLowerCase()}>
+                                  {status}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
             </div>
           )}
 
