@@ -154,7 +154,15 @@ const LEBIH_FIELDS = ADJUSTMENT_FIELDS.filter((f) => f.group === "lebih");
 function emptyOpening() {
   const o = { bulan: "" };
   MK_ELEMENTS.forEach((e) => (o[e.id] = ""));
+  ADJUSTMENT_FIELDS.forEach((f) => (o[f.id] = ""));
   return o;
+}
+
+function computeOpeningTotal(opening) {
+  const base = MK_ELEMENTS.reduce((s, e) => s + toNumber(opening?.[e.id]), 0);
+  const kurang = KURANG_FIELDS.reduce((s, f) => s + toNumber(opening?.[f.id]), 0);
+  const lebih = LEBIH_FIELDS.reduce((s, f) => s + toNumber(opening?.[f.id]), 0);
+  return base - kurang + lebih;
 }
 
 function emptyCluster() {
@@ -177,7 +185,7 @@ function summarizeCluster(c) {
   Object.keys(c.manual || {}).forEach((d) => dates.add(d));
   const sorted = Array.from(dates).sort();
   const last = sorted[sorted.length - 1];
-  const openingTotal = MK_ELEMENTS.reduce((s, e) => s + toNumber(c.opening?.[e.id]), 0);
+  const openingTotal = computeOpeningTotal(c.opening);
   const elementsAtClose = {};
   let actualLast = 0;
   if (last) {
@@ -364,6 +372,37 @@ export default function ModalKerjaPrototype() {
   const PAGE_SIZE = 4;
 
   const [dismissedMonths, setDismissedMonths] = useState([]);
+
+  const [openingDraft, setOpeningDraft] = useState(store[activeCluster]?.opening || emptyOpening());
+  const [openingSavedMsg, setOpeningSavedMsg] = useState("");
+  useEffect(() => {
+    setOpeningDraft(store[activeCluster]?.opening || emptyOpening());
+    setOpeningSavedMsg("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCluster]);
+
+  function setDraftField(field, value) {
+    setOpeningDraft((prev) => ({ ...prev, [field]: value }));
+    setOpeningSavedMsg("");
+  }
+
+  const openingDraftTotal = computeOpeningTotal(openingDraft);
+  const openingDraftKurang = KURANG_FIELDS.reduce((s, f) => s + toNumber(openingDraft[f.id]), 0);
+  const openingDraftLebih = LEBIH_FIELDS.reduce((s, f) => s + toNumber(openingDraft[f.id]), 0);
+
+  async function handleSaveOpening() {
+    const period = cData.activePeriod || monthKey(dateKey(new Date()));
+    const newCData = { ...cData, opening: { ...openingDraft }, activePeriod: period };
+    updateCluster(() => newCData);
+    setOpeningSavedMsg("Menyimpan...");
+    try {
+      const key = "mk:" + activeCluster + ":" + period;
+      await storage.set(key, JSON.stringify(newCData), false);
+      setOpeningSavedMsg("Tersimpan · " + new Date().toLocaleTimeString("id-ID"));
+    } catch (err) {
+      setOpeningSavedMsg("Gagal menyimpan");
+    }
+  }
   const [saveStatus, setSaveStatus] = useState("");
   const [historyKeys, setHistoryKeys] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -435,7 +474,7 @@ export default function ModalKerjaPrototype() {
     updateCluster((c) => ({ ...c, opening: { ...c.opening, [field]: value } }));
   }
 
-  const openingTotal = MK_ELEMENTS.reduce((sum, e) => sum + toNumber(cData.opening[e.id]), 0);
+  const openingTotal = computeOpeningTotal(cData.opening);
 
   const allDates = useMemo(() => {
     const s = new Set();
@@ -721,6 +760,10 @@ export default function ModalKerjaPrototype() {
         .mk-opening-field label { font-size: 11px; color: #a8a492; }
         .mk-opening-field input { border: 1px solid var(--rule-soft); background: var(--paper-2); font-family: 'IBM Plex Mono', monospace; font-size: 13px; padding: 6px 8px; border-radius: 3px; color: #524646; }
         .mk-opening-total { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--rule-soft); display: flex; justify-content: space-between; font-family: 'IBM Plex Mono', monospace; font-size: 13.5px; color: #524646; font-weight: 600; }
+        .mk-opening-subhead { font-size: 12px; color: #524646; font-weight: 600; margin: 18px 0 8px; padding-top: 12px; border-top: 1px dashed var(--rule-soft); }
+        .mk-opening-subhead span { font-weight: 400; color: var(--ink-text-dim); font-size: 11px; }
+        .mk-opening-subtotal { margin-top: 8px; display: flex; justify-content: space-between; font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; color: var(--ink-text-dim); }
+        .mk-opening-save-row { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--rule-soft); display: flex; align-items: center; gap: 12px; }
 
         .mk-manual-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; margin-top: 10px; }
         .mk-manual-cell { background: var(--paper); border-radius: 4px; padding: 10px 11px; border: 1px solid var(--rule-soft); }
@@ -875,8 +918,8 @@ export default function ModalKerjaPrototype() {
                   <label>Bulan berjalan</label>
                   <input
                     placeholder="mis. Agustus 2026"
-                    value={cData.opening.bulan}
-                    onChange={(e) => setOpening("bulan", e.target.value)}
+                    value={openingDraft.bulan}
+                    onChange={(e) => setDraftField("bulan", e.target.value)}
                   />
                 </div>
                 <div className="mk-opening-grid">
@@ -886,15 +929,65 @@ export default function ModalKerjaPrototype() {
                       <input
                         type="number"
                         placeholder="0"
-                        value={cData.opening[e.id]}
-                        onChange={(ev) => setOpening(e.id, ev.target.value)}
+                        value={openingDraft[e.id]}
+                        onChange={(ev) => setDraftField(e.id, ev.target.value)}
                       />
                     </div>
                   ))}
                 </div>
+
+                <div className="mk-opening-subhead">
+                  Selisih Kurang <span>(mengurangi Modal Kerja Awal)</span>
+                </div>
+                <div className="mk-opening-grid">
+                  {KURANG_FIELDS.map((f) => (
+                    <div className="mk-opening-field" key={f.id}>
+                      <label>{f.label}</label>
+                      <input
+                        type="number"
+                        placeholder="0"
+                        value={openingDraft[f.id]}
+                        onChange={(ev) => setDraftField(f.id, ev.target.value)}
+                      />
+                    </div>
+                  ))}
+                </div>
+                <div className="mk-opening-subtotal">
+                  <span>Total Selisih Kurang</span>
+                  <span>- {fmtRp(openingDraftKurang)}</span>
+                </div>
+
+                <div className="mk-opening-subhead">
+                  Selisih Lebih <span>(menambah Modal Kerja Awal)</span>
+                </div>
+                <div className="mk-opening-grid">
+                  {LEBIH_FIELDS.map((f) => (
+                    <div className="mk-opening-field" key={f.id}>
+                      <label>{f.label}</label>
+                      <input
+                        type="number"
+                        placeholder="0"
+                        value={openingDraft[f.id]}
+                        onChange={(ev) => setDraftField(f.id, ev.target.value)}
+                      />
+                    </div>
+                  ))}
+                </div>
+                <div className="mk-opening-subtotal">
+                  <span>Total Selisih Lebih</span>
+                  <span>+ {fmtRp(openingDraftLebih)}</span>
+                </div>
+
                 <div className="mk-opening-total">
-                  <span>Total Modal Kerja Awal</span>
-                  <span>{fmtRp(openingTotal)}</span>
+                  <span>Total Modal Kerja Awal (setelah Selisih Kurang/Lebih)</span>
+                  <span>{fmtRp(openingDraftTotal)}</span>
+                </div>
+
+                <div className="mk-opening-save-row">
+                  <button className="mk-single-save" onClick={handleSaveOpening}>
+                    Simpan Modal Kerja Awal
+                  </button>
+                  {openingSavedMsg && <span className="mk-single-saved-msg">{openingSavedMsg}</span>}
                 </div>
               </div>
 
