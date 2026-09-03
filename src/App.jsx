@@ -755,8 +755,10 @@ export default function ModalKerjaPrototype() {
           background: var(--ink);
           color: var(--ink-text);
           min-height: 100%;
+          max-width: 100vw;
+          overflow-x: hidden;
         }
-        .mk-shell { display: grid; grid-template-columns: 220px 1fr; min-height: 100%; }
+        .mk-shell { display: grid; grid-template-columns: 220px minmax(0, 1fr); min-height: 100%; max-width: 100vw; overflow-x: hidden; }
         .mk-rail { background: var(--ink-2); border-right: 1px solid var(--rule); padding: 20px 16px; display: flex; flex-direction: column; gap: 22px; }
         .mk-brand { font-size: 14px; letter-spacing: 0.02em; color: var(--ink-text); line-height: 1.4; }
         .mk-brand b { color: var(--accent); font-weight: 700; }
@@ -769,7 +771,7 @@ export default function ModalKerjaPrototype() {
         .mk-add-row button { background: none; border: 1px solid var(--rule); color: var(--accent); font-size: 12.5px; padding: 6px 9px; border-radius: 3px; cursor: pointer; }
         .mk-note { font-size: 11.5px; color: var(--ink-text-dim); line-height: 1.5; border-top: 1px solid var(--rule); padding-top: 14px; margin-top: auto; }
 
-        .mk-main { padding: 28px 36px 60px; }
+        .mk-main { padding: 28px 36px 60px; min-width: 0; max-width: 100%; overflow-x: hidden; }
         .mk-header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 4px; }
         .mk-h1 { font-size: 22px; font-weight: 700; color: var(--ink-text); }
         .mk-sub { font-size: 13px; color: var(--ink-text-dim); margin-bottom: 22px; }
