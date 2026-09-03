@@ -361,6 +361,24 @@ export default function ModalKerjaPrototype() {
 
   const [store, setStore] = useState({});
 
+  // load the list of cluster names from Supabase on first load, so
+  // refreshing the page doesn't lose track of clusters that were created
+  // (and whose data is already saved) in an earlier session.
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await storage.get("_clusters", false);
+        const list = JSON.parse(res.value);
+        if (Array.isArray(list) && list.length > 0) {
+          setClusters(list);
+          setActiveCluster((prev) => prev || list[0]);
+        }
+      } catch (err) {
+        // belum ada cluster yang pernah disimpan
+      }
+    })();
+  }, []);
+
   const [newBankName, setNewBankName] = useState("");
   const [bankNames, setBankNames] = useState(["BCA", "BRI"]);
 
@@ -836,10 +854,12 @@ export default function ModalKerjaPrototype() {
                 onClick={() => {
                   const name = newCluster.trim();
                   if (!name || clusters.includes(name)) return;
-                  setClusters([...clusters, name]);
+                  const nextList = [...clusters, name];
+                  setClusters(nextList);
                   setStore((prev) => ({ ...prev, [name]: emptyCluster() }));
                   setActiveCluster(name);
                   setNewCluster("");
+                  storage.set("_clusters", JSON.stringify(nextList), false).catch(() => {});
                 }}
               >
                 +
