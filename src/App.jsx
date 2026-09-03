@@ -434,6 +434,21 @@ export default function ModalKerjaPrototype() {
       setOpeningSavedMsg("Gagal menyimpan");
     }
   }
+
+  const [uploadSavedMsg, setUploadSavedMsg] = useState("");
+  async function handleSaveWorksheet() {
+    const period = cData.activePeriod || monthKey(dateKey(new Date()));
+    const newCData = { ...cData, activePeriod: period };
+    updateCluster(() => newCData);
+    setUploadSavedMsg("Menyimpan...");
+    try {
+      const key = "mk:" + activeCluster + ":" + period;
+      await storage.set(key, JSON.stringify(newCData), false);
+      setUploadSavedMsg("Tersimpan ke Supabase · " + new Date().toLocaleTimeString("id-ID"));
+    } catch (err) {
+      setUploadSavedMsg("Gagal menyimpan");
+    }
+  }
   const [saveStatus, setSaveStatus] = useState("");
   const [historyKeys, setHistoryKeys] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -797,6 +812,7 @@ export default function ModalKerjaPrototype() {
         .mk-opening-subhead span { font-weight: 400; color: var(--ink-text-dim); font-size: 11px; }
         .mk-opening-subtotal { margin-top: 8px; display: flex; justify-content: space-between; font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; color: var(--ink-text-dim); }
         .mk-opening-save-row { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--rule-soft); display: flex; align-items: center; gap: 12px; }
+        .mk-upload-save-hint { font-size: 11.5px; color: var(--ink-text-dim); line-height: 1.5; margin: 8px 0 26px; max-width: 640px; }
 
         .mk-manual-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; margin-top: 10px; }
         .mk-manual-cell { background: var(--paper); border-radius: 4px; padding: 10px 11px; border: 1px solid var(--rule-soft); }
@@ -1097,6 +1113,18 @@ export default function ModalKerjaPrototype() {
                   rowCount={cData.xendit.rowCount}
                   onFile={handleXenditFile}
                 />
+              </div>
+
+              <div className="mk-opening-save-row">
+                <button className="mk-single-save" onClick={handleSaveWorksheet}>
+                  Simpan Data Upload Hari Ini
+                </button>
+                {uploadSavedMsg && <span className="mk-single-saved-msg">{uploadSavedMsg}</span>}
+              </div>
+              <div className="mk-upload-save-hint">
+                Setiap upload (Order Log, Mutasi Bank, Xendit) langsung menggantikan data lama di kartu yang sama —
+                kalau upload sore lebih lengkap dari pagi, tinggal upload ulang lalu klik Simpan di sini, tidak
+                perlu ulang dari awal.
               </div>
 
               {allDates.length > 0 && (
