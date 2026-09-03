@@ -637,6 +637,21 @@ export default function ModalKerjaPrototype() {
     setViewingLoading(false);
   }
 
+  async function openPeriodForEditing(key) {
+    try {
+      const res = await storage.get(key, false);
+      const parsed = res ? JSON.parse(res.value) : null;
+      if (!parsed) return;
+      const period = key.split(":").pop();
+      updateCluster(() => ({ ...parsed, activePeriod: period }));
+      setOpeningDraft(parsed.opening || emptyOpening());
+      setSaveStatus("Lembar kerja " + formatMonthLabel(period) + " dibuka untuk diedit");
+      setTab("summaryMK");
+    } catch (err) {
+      setSaveStatus("Gagal membuka lembar kerja bulan tersebut");
+    }
+  }
+
   // reconciliation: omset vs uang masuk
   const omset = {};
   const uangMasuk = {};
@@ -1410,6 +1425,18 @@ export default function ModalKerjaPrototype() {
                               ))}
                             </tbody>
                           </table>
+                        </div>
+                        <div className="mk-opening-save-row">
+                          <button
+                            className="mk-single-save"
+                            onClick={() => openPeriodForEditing(viewingPeriod)}
+                          >
+                            Buka &amp; Edit Bulan Ini
+                          </button>
+                          <span className="mk-single-saved-msg">
+                            Setelah dibuka, tab Summary MK dan Modal Kerja akan menampilkan bulan ini, dan kamu bisa
+                            unggah/edit data tambahan untuk bulan ini di tab Unggah Data.
+                          </span>
                         </div>
                       </>
                     );
