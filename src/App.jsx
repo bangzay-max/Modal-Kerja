@@ -1204,9 +1204,16 @@ export default function ModalKerjaPrototype() {
 
           {tab === "modalKerja" && (
             <div>
-              {!hasData && (
+              {!hasData && openingTotal === 0 && (
                 <div className="mk-section-title">
-                  Belum ada data diunggah — kolom di bawah menampilkan struktur dengan nilai Rp 0.
+                  Belum ada Modal Kerja Awal maupun data harian — kolom di bawah menampilkan struktur dengan nilai
+                  Rp 0.
+                </div>
+              )}
+              {!hasData && openingTotal !== 0 && (
+                <div className="mk-section-title">
+                  Modal Kerja Awal sudah tersimpan (baris pertama di bawah). Kolom tanggal harian masih Rp 0 karena
+                  belum ada Order Log / Mutasi Bank / Xendit yang diunggah.
                 </div>
               )}
               <div className="mk-section-title">
@@ -1231,6 +1238,17 @@ export default function ModalKerjaPrototype() {
                     </tr>
                   </thead>
                   <tbody>
+                    <tr className="lrow band-purple">
+                      <td className="lr-label">
+                        Modal Kerja Awal ({cData.opening.bulan || "bulan berjalan"})
+                      </td>
+                      {MK_SUMMARY_ORDER.map((id) => (
+                        <td key={id} className="lr-val">
+                          {fmtRp(toNumber(cData.opening[id]))}
+                        </td>
+                      ))}
+                      <td className="lr-val">{fmtRp(openingTotal)}</td>
+                    </tr>
                     {calcDates.map((d) => (
                       <tr key={d} className="lrow">
                         <td className="lr-label">{formatDateLabel(d)}</td>
