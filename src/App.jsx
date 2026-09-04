@@ -118,7 +118,7 @@ function parseOrderLog(rows, clusterName, expectedType) {
     const dt = parseAnyDate(getField(row, ["Order Time", "order time"]));
     if (!dt) continue;
     const key = dateKey(dt);
-    const total = toNumber(getField(row, ["Total Product", "total product"]));
+    const total = toNumber(getField(row, ["Total Payment (Rp)", "Total Payment", "total payment (rp)"]));
     byDate[key] = (byDate[key] || 0) + total;
   }
   return byDate;
@@ -1187,7 +1187,8 @@ export default function ModalKerjaPrototype() {
               <div className="mk-upload-save-hint">
                 Otomatis difilter berdasarkan kolom "Sales Cluster" (= "{activeCluster}") dan "Product Type" (harus
                 cocok Physical/Logical/WG sesuai kartunya) — baris di luar itu diabaikan walau ada di file yang
-                sama. Total Order Log Physical otomatis masuk ke elemen <b>Fisik</b> di Summary MK &amp; Modal
+                sama. Total penjualan diambil dari kolom <b>Total Payment (Rp)</b> (bukan lagi Total Product ×
+                harga). Total Order Log Physical otomatis masuk ke elemen <b>Fisik</b> di Summary MK &amp; Modal
                 Kerja, tidak perlu diisi manual lagi.
               </div>
               <div className="mk-grid">
@@ -1195,7 +1196,7 @@ export default function ModalKerjaPrototype() {
                   <UploadCard
                     key={slot.id}
                     title={slot.label}
-                    hint="CSV atau Excel (.xlsx). Kolom wajib: Order Time, Total Product, Sales Cluster"
+                    hint="CSV atau Excel (.xlsx). Kolom wajib: Order Time, Total Payment (Rp), Sales Cluster, Product Type"
                     fileName={cData.orderLogFiles[slot.id]?.name}
                     rowCount={cData.orderLogFiles[slot.id]?.rows || 0}
                     onFile={(f) => handleOrderLogFile(slot.id, f)}
