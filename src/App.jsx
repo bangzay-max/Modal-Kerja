@@ -1,8 +1,39 @@
 import { useState, useMemo, useRef, useEffect } from "react";
 import { storage } from "./storage";
 import Papa from "papaparse";
+import * as XLSX from "xlsx";
 
 // ---------- helpers ----------
+
+// Terima file CSV atau Excel (.xlsx/.xls), hasilnya selalu array of object
+// {header: value} seperti Papa.parse({header:true}) — jadi parser lain di
+// bawah (parseOrderLog, dst) tidak perlu tahu bedanya.
+function parseSpreadsheetFile(file, onData) {
+  const name = file.name.toLowerCase();
+  if (name.endsWith(".xlsx") || name.endsWith(".xls")) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: "array", cellDates: true });
+        const sheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+        onData(rows);
+      } catch (err) {
+        onData([]);
+      }
+    };
+    reader.onerror = () => onData([]);
+    reader.readAsArrayBuffer(file);
+  } else {
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: (res) => onData(res.data),
+    });
+  }
+}
 
 function getField(row, keys) {
   for (const k of keys) {
@@ -296,7 +327,7 @@ function UploadCard({ title, hint, fileName, rowCount, onFile }) {
         <input
           ref={inputRef}
           type="file"
-          accept=".csv"
+          accept=".csv,.xlsx,.xls"
           style={{ display: "none" }}
           onChange={(e) => {
             const f = e.target.files?.[0];
@@ -529,52 +560,40 @@ export default function ModalKerjaPrototype() {
   }
 
   function handleOrderLogFile(slotId, file) {
-    Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: (res) => {
-        const byDate = parseOrderLog(res.data, activeCluster);
-        const byCanvasser = parseOrderLogByCanvasser(res.data, activeCluster);
-        const matchedCount = Object.values(byDate).length > 0 || Object.keys(byCanvasser).length > 0;
-        updateCluster((c) => ({
-          ...c,
-          orderLog: { ...c.orderLog, [slotId]: byDate },
-          orderLogByCanvasser: { ...c.orderLogByCanvasser, [slotId]: byCanvasser },
-          orderLogFiles: { ...c.orderLogFiles, [slotId]: { name: file.name, rows: res.data.length } },
-        }));
-        if (!matchedCount && res.data.length > 0) {
-          setUploadSavedMsg(
-            'Tidak ada baris dengan kolom "Sales Cluster" = "' +
-              activeCluster +
-              '" di file ini — cek apakah file-nya untuk cluster yang benar.'
-          );
-        }
-      },
+    parseSpreadsheetFile(file, (data) => {
+      const byDate = parseOrderLog(data, activeCluster);
+      const byCanvasser = parseOrderLogByCanvasser(data, activeCluster);
+      const matchedCount = Object.values(byDate).length > 0 || Object.keys(byCanvasser).length > 0;
+      updateCluster((c) => ({
+        ...c,
+        orderLog: { ...c.orderLog, [slotId]: byDate },
+        orderLogByCanvasser: { ...c.orderLogByCanvasser, [slotId]: byCanvasser },
+        orderLogFiles: { ...c.orderLogFiles, [slotId]: { name: file.name, rows: data.length } },
+      }));
+      if (!matchedCount && data.length > 0) {
+        setUploadSavedMsg(
+          'Tidak ada baris dengan kolom "Sales Cluster" = "' +
+            activeCluster +
+            '" di file ini — cek apakah file-nya untuk cluster yang benar.'
+        );
+      }
     });
   }
 
   function handleBankFile(bankName, file) {
-    Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: (res) => {
-        const byDate = parseBankMutasi(res.data);
-        updateCluster((c) => ({
-          ...c,
-          banks: { ...c.banks, [bankName]: { byDate, fileName: file.name, rowCount: res.data.length } },
-        }));
-      },
+    parseSpreadsheetFile(file, (data) => {
+      const byDate = parseBankMutasi(data);
+      updateCluster((c) => ({
+        ...c,
+        banks: { ...c.banks, [bankName]: { byDate, fileName: file.name, rowCount: data.length } },
+      }));
     });
   }
 
   function handleXenditFile(file) {
-    Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: (res) => {
-        const byDate = parseXendit(res.data);
-        updateCluster((c) => ({ ...c, xendit: { byDate, fileName: file.name, rowCount: res.data.length } }));
-      },
+    parseSpreadsheetFile(file, (data) => {
+      const byDate = parseXendit(data);
+      updateCluster((c) => ({ ...c, xendit: { byDate, fileName: file.name, rowCount: data.length } }));
     });
   }
 
@@ -1170,7 +1189,7 @@ export default function ModalKerjaPrototype() {
                   <UploadCard
                     key={slot.id}
                     title={slot.label}
-                    hint="Kolom wajib: Order Time, Total Product"
+                    hint="CSV atau Excel (.xlsx). Kolom wajib: Order Time, Total Product, Sales Cluster"
                     fileName={cData.orderLogFiles[slot.id]?.name}
                     rowCount={cData.orderLogFiles[slot.id]?.rows || 0}
                     onFile={(f) => handleOrderLogFile(slot.id, f)}
@@ -1201,7 +1220,7 @@ export default function ModalKerjaPrototype() {
                   <UploadCard
                     key={bank}
                     title={"Mutasi " + bank}
-                    hint="Kolom wajib: Tanggal, JUMLAH, DB/CR, SALDO"
+                    hint="CSV atau Excel (.xlsx). Kolom wajib: Tanggal, JUMLAH, DB/CR, SALDO"
                     fileName={cData.banks[bank]?.fileName}
                     rowCount={cData.banks[bank]?.rowCount || 0}
                     onFile={(f) => handleBankFile(bank, f)}
@@ -1213,7 +1232,7 @@ export default function ModalKerjaPrototype() {
               <div className="mk-grid">
                 <UploadCard
                   title="Xendit"
-                  hint="Kolom wajib: Created Date, Amount, Debit or Credit, Balance"
+                  hint="CSV atau Excel (.xlsx). Kolom wajib: Created Date, Amount, Debit or Credit, Balance"
                   fileName={cData.xendit.fileName}
                   rowCount={cData.xendit.rowCount}
                   onFile={handleXenditFile}
