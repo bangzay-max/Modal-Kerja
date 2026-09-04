@@ -103,10 +103,18 @@ function matchesCluster(row, clusterName) {
   return rowCluster === String(clusterName).trim().toLowerCase();
 }
 
-function parseOrderLog(rows, clusterName) {
+function matchesProductType(row, expectedType) {
+  if (!expectedType) return true;
+  const val = String(getField(row, ["Product Type", "product type"])).trim();
+  if (!val) return true; // kolom tidak ada di file ini — jangan buang baris valid
+  return val.toLowerCase() === expectedType.toLowerCase();
+}
+
+function parseOrderLog(rows, clusterName, expectedType) {
   const byDate = {};
   for (const row of rows) {
     if (!matchesCluster(row, clusterName)) continue;
+    if (!matchesProductType(row, expectedType)) continue;
     const dt = parseAnyDate(getField(row, ["Order Time", "order time"]));
     if (!dt) continue;
     const key = dateKey(dt);
@@ -150,10 +158,11 @@ function parseXendit(rows) {
   return byDate;
 }
 
-function parseOrderLogByCanvasser(rows, clusterName) {
+function parseOrderLogByCanvasser(rows, clusterName, expectedType) {
   const map = {};
   for (const row of rows) {
     if (!matchesCluster(row, clusterName)) continue;
+    if (!matchesProductType(row, expectedType)) continue;
     const status = getField(row, ["Status Order", "status order"]);
     if (String(status).trim().toLowerCase() !== "completed") continue;
     const canvasserId = getField(row, ["Canvasser ID", "canvasser id"]);
@@ -211,9 +220,9 @@ function aggregateCanvasserSales(orderLogByCanvasser) {
 // ---------- config ----------
 
 const ORDER_LOG_SLOTS = [
-  { id: "physical", label: "Order Log Physical" },
-  { id: "logical", label: "Order Log Logical" },
-  { id: "wg", label: "Order Log WG" },
+  { id: "physical", label: "Order Log Physical", productType: "Physical" },
+  { id: "logical", label: "Order Log Logical", productType: "Logical" },
+  { id: "wg", label: "Order Log WG", productType: "WG" },
 ];
 
 // the 7 elements that make up Modal Kerja
@@ -221,7 +230,7 @@ const MK_ELEMENTS = [
   { id: "bank", label: "Dana Bank", auto: true },
   { id: "xendit", label: "Xendit", auto: true },
   { id: "logical", label: "Logical", auto: false },
-  { id: "fisik", label: "Fisik", auto: false },
+  { id: "fisik", label: "Fisik", auto: true },
   { id: "attack", label: "Product Attack", auto: false },
   { id: "eload", label: "Eload", auto: false },
   { id: "stockWG", label: "Stock WG", auto: false },
@@ -560,9 +569,10 @@ export default function ModalKerjaPrototype() {
   }
 
   function handleOrderLogFile(slotId, file) {
+    const slotDef = ORDER_LOG_SLOTS.find((s) => s.id === slotId);
     parseSpreadsheetFile(file, (data) => {
-      const byDate = parseOrderLog(data, activeCluster);
-      const byCanvasser = parseOrderLogByCanvasser(data, activeCluster);
+      const byDate = parseOrderLog(data, activeCluster, slotDef?.productType);
+      const byCanvasser = parseOrderLogByCanvasser(data, activeCluster, slotDef?.productType);
       const matchedCount = Object.values(byDate).length > 0 || Object.keys(byCanvasser).length > 0;
       updateCluster((c) => ({
         ...c,
@@ -574,7 +584,9 @@ export default function ModalKerjaPrototype() {
         setUploadSavedMsg(
           'Tidak ada baris dengan kolom "Sales Cluster" = "' +
             activeCluster +
-            '" di file ini — cek apakah file-nya untuk cluster yang benar.'
+            '" (dan Product Type = "' +
+            (slotDef?.productType || "-") +
+            '") di file ini — cek apakah file-nya untuk cluster/kategori yang benar.'
         );
       }
     });
@@ -774,6 +786,7 @@ export default function ModalKerjaPrototype() {
     });
     elementActual.bank[d] = total;
     elementActual.xendit[d] = cData.xendit.byDate[d]?.saldoAkhir || 0;
+    elementActual.fisik[d] = cData.orderLog.physical[d] || 0;
     MANUAL_ELEMENTS.forEach((e) => {
       elementActual[e.id][d] = toNumber((cData.manual[d] || {})[e.id]);
     });
@@ -1181,8 +1194,10 @@ export default function ModalKerjaPrototype() {
 
               <div className="mk-section-title">Order Log</div>
               <div className="mk-upload-save-hint">
-                Otomatis difilter berdasarkan kolom "Sales Cluster" di file — hanya baris dengan Sales Cluster =
-                "{activeCluster}" yang dihitung, walau file-nya berisi banyak cluster sekaligus.
+                Otomatis difilter berdasarkan kolom "Sales Cluster" (= "{activeCluster}") dan "Product Type" (harus
+                cocok Physical/Logical/WG sesuai kartunya) — baris di luar itu diabaikan walau ada di file yang
+                sama. Total Order Log Physical otomatis masuk ke elemen <b>Fisik</b> di Summary MK &amp; Modal
+                Kerja, tidak perlu diisi manual lagi.
               </div>
               <div className="mk-grid">
                 {ORDER_LOG_SLOTS.map((slot) => (
