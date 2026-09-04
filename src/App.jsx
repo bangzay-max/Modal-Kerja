@@ -169,52 +169,38 @@ function parseOrderLogByCanvasser(rows, clusterName, expectedType) {
     const canvasserName = getField(row, ["Canvasser Name", "canvasser name"]);
     if (!canvasserId && !canvasserName) continue;
     const dt = parseAnyDate(getField(row, ["Last Update", "last update"]));
-    const productName = getField(row, ["Product Name/Denom", "Product Name", "product name"]) || "-";
-    const qty = toNumber(getField(row, ["Total Product", "total product"]));
-    const priceSum =
-      toNumber(getField(row, ["Product Price"])) +
-      toNumber(getField(row, ["Package Price"])) +
-      toNumber(getField(row, ["Markup Price"]));
-    const total = qty * priceSum;
-    const key = (canvasserId || canvasserName) + "|" + productName;
+    if (!dt) continue;
+    const dateStr = dateKey(dt);
+    const total = toNumber(getField(row, ["Total Payment (Rp)", "Total Payment", "total payment (rp)"]));
+    const key = (canvasserId || canvasserName) + "|" + dateStr;
     if (!map[key]) {
-      map[key] = {
-        canvasserId,
-        canvasserName,
-        productName,
-        lastDate: dt ? dateKey(dt) : "",
-        qty: 0,
-        total: 0,
-      };
+      map[key] = { canvasserId, canvasserName, date: dateStr, total: 0 };
     }
-    map[key].qty += qty;
     map[key].total += total;
-    if (dt) {
-      const dStr = dateKey(dt);
-      if (!map[key].lastDate || dStr > map[key].lastDate) map[key].lastDate = dStr;
-    }
   }
   return map;
 }
 
 function aggregateCanvasserSales(orderLogByCanvasser) {
-  const detail = [];
+  const items = [];
   ["physical", "logical", "wg"].forEach((slot) => {
-    Object.values(orderLogByCanvasser?.[slot] || {}).forEach((item) => detail.push(item));
+    Object.values(orderLogByCanvasser?.[slot] || {}).forEach((item) => items.push(item));
   });
-  const summaryMap = {};
-  detail.forEach((item) => {
+  const salesMap = {};
+  const datesSet = new Set();
+  items.forEach((item) => {
     const key = item.canvasserId || item.canvasserName;
-    if (!summaryMap[key]) {
-      summaryMap[key] = { canvasserId: item.canvasserId, canvasserName: item.canvasserName, totalSales: 0 };
+    if (!salesMap[key]) {
+      salesMap[key] = { canvasserId: item.canvasserId, canvasserName: item.canvasserName, byDate: {} };
     }
-    summaryMap[key].totalSales += item.total;
+    salesMap[key].byDate[item.date] = (salesMap[key].byDate[item.date] || 0) + item.total;
+    datesSet.add(item.date);
   });
-  const summary = Object.values(summaryMap).sort((a, b) => b.totalSales - a.totalSales);
-  const detailSorted = [...detail].sort(
-    (a, b) => (a.canvasserName || "").localeCompare(b.canvasserName || "") || (a.productName || "").localeCompare(b.productName || "")
-  );
-  return { summary, detail: detailSorted };
+  const sales = Object.values(salesMap)
+    .map((s) => ({ ...s, grandTotal: Object.values(s.byDate).reduce((a, b) => a + b, 0) }))
+    .sort((a, b) => b.grandTotal - a.grandTotal);
+  const dates = Array.from(datesSet).sort();
+  return { sales, dates };
 }
 
 // ---------- config ----------
@@ -822,6 +808,11 @@ export default function ModalKerjaPrototype() {
 
   const bankList = Object.keys(cData.banks);
   const canvasserSales = aggregateCanvasserSales(cData.orderLogByCanvasser);
+  const canvasserDatesFiltered = canvasserSales.dates.filter((d) => {
+    if (rangeFrom && d < rangeFrom) return false;
+    if (rangeTo && d > rangeTo) return false;
+    return true;
+  });
 
   const rangeFilteredDates = calcDates.filter((d) => {
     if (rangeFrom && d < rangeFrom) return false;
@@ -1486,72 +1477,64 @@ export default function ModalKerjaPrototype() {
 
           {tab === "rekapSales" && (
             <div>
-              {canvasserSales.summary.length === 0 ? (
+              {canvasserSales.sales.length === 0 ? (
                 <div className="mk-empty">
                   Belum ada data. Rekap ini otomatis dari Order Log (Physical/Logical/WG) — hanya baris dengan
-                  Status Order "Completed" yang dihitung, dikelompokkan per Canvasser Name.
+                  Sales Cluster sesuai lembar kerja dan Status Order "Completed" yang dihitung.
                 </div>
               ) : (
                 <>
-                  <div className="mk-section-title">
-                    Rekap Penjualan per Sales — dari Order Log (Status Order: Completed), semua tanggal yang
-                    diunggah
-                  </div>
+                  <div className="mk-section-title">Rekap Penjualan per Sales — per Tanggal</div>
                   <div className="mk-upload-save-hint">
-                    Total penjualan = Total Product (qty) × (Product Price + Package Price + Markup Price), tanggal
-                    diambil dari kolom Last Update. Rekonsiliasi uang masuk vs omset tetap dilihat di level
-                    keseluruhan cluster pada tab Summary MK (Rekonsiliasi Omset vs Uang Masuk) — Mutasi Bank & Xendit
-                    tidak mencatat per-sales.
+                    Total penjualan diambil langsung dari kolom "Total Payment (Rp)", tanggal dari kolom Last
+                    Update, sudah difilter Sales Cluster = "{activeCluster}" dan Status Order = "Completed".
+                    Rekonsiliasi uang masuk vs omset tetap dilihat di level keseluruhan cluster pada tab Summary MK
+                    — Mutasi Bank & Xendit tidak mencatat per-sales.
+                  </div>
+                  <div className="mk-toolbar">
+                    <div className="mk-toolbar-range">
+                      <label>Dari</label>
+                      <input type="date" value={rangeFrom} onChange={(e) => setRangeFrom(e.target.value)} />
+                      <label>Sampai</label>
+                      <input type="date" value={rangeTo} onChange={(e) => setRangeTo(e.target.value)} />
+                      {(rangeFrom || rangeTo) && (
+                        <button
+                          className="mk-toolbar-reset"
+                          onClick={() => {
+                            setRangeFrom("");
+                            setRangeTo("");
+                          }}
+                        >
+                          Reset filter
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <div className="mk-table-wrap">
                     <table className="mk-ledger">
                       <thead>
                         <tr>
-                          <th>Canvasser ID</th>
                           <th>Nama Sales</th>
-                          <th>Total Penjualan</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {canvasserSales.summary.map((s) => (
-                          <tr key={s.canvasserId + "|" + s.canvasserName} className="lrow">
-                            <td className="lr-label">{s.canvasserId}</td>
-                            <td className="lr-val" style={{ textAlign: "left" }}>
-                              {s.canvasserName}
-                            </td>
-                            <td className="lr-val">{fmtRp(s.totalSales)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  <div className="mk-section-title">Detail per Sales per Produk</div>
-                  <div className="mk-table-wrap">
-                    <table className="mk-ledger">
-                      <thead>
-                        <tr>
-                          <th>Nama Sales</th>
-                          <th>Nama Produk</th>
-                          <th>Tanggal Terakhir</th>
-                          <th>Qty (Total Product)</th>
-                          <th>Harga Barang</th>
+                          {canvasserDatesFiltered.map((d) => (
+                            <th key={d}>{formatDateLabel(d)}</th>
+                          ))}
                           <th>Total</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {canvasserSales.detail.map((d, i) => (
-                          <tr key={i} className="lrow">
+                        {canvasserSales.sales.map((s) => (
+                          <tr key={s.canvasserId + "|" + s.canvasserName} className="lrow">
                             <td className="lr-label" style={{ textAlign: "left" }}>
-                              {d.canvasserName}
+                              {s.canvasserName}
                             </td>
-                            <td className="lr-val" style={{ textAlign: "left" }}>
-                              {d.productName}
+                            {canvasserDatesFiltered.map((d) => (
+                              <td key={d} className="lr-val">
+                                {fmtRp(s.byDate[d] || 0)}
+                              </td>
+                            ))}
+                            <td className="lr-val" style={{ fontWeight: 600 }}>
+                              {fmtRp(s.grandTotal)}
                             </td>
-                            <td className="lr-val">{d.lastDate ? formatDateLabel(d.lastDate) : "-"}</td>
-                            <td className="lr-val">{d.qty.toLocaleString("id-ID")}</td>
-                            <td className="lr-val">{fmtRp(d.qty > 0 ? d.total / d.qty : 0)}</td>
-                            <td className="lr-val">{fmtRp(d.total)}</td>
                           </tr>
                         ))}
                       </tbody>
