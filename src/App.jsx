@@ -66,9 +66,16 @@ function toNumber(v) {
 
 // ---------- parsers per source type ----------
 
-function parseOrderLog(rows) {
+function matchesCluster(row, clusterName) {
+  if (!clusterName) return true;
+  const rowCluster = String(getField(row, ["Sales Cluster", "sales cluster"])).trim().toLowerCase();
+  return rowCluster === String(clusterName).trim().toLowerCase();
+}
+
+function parseOrderLog(rows, clusterName) {
   const byDate = {};
   for (const row of rows) {
+    if (!matchesCluster(row, clusterName)) continue;
     const dt = parseAnyDate(getField(row, ["Order Time", "order time"]));
     if (!dt) continue;
     const key = dateKey(dt);
@@ -112,54 +119,62 @@ function parseXendit(rows) {
   return byDate;
 }
 
-function parseSettlement(rows) {
-  const byDate = {};
+function parseOrderLogByCanvasser(rows, clusterName) {
+  const map = {};
   for (const row of rows) {
-    const dt = parseAnyDate(getField(row, ["Tanggal", "tanggal"]));
-    if (!dt) continue;
-    const key = dateKey(dt);
-    const rec = {
-      depo: getField(row, ["Depo", "DEPO", "City"]),
-      spv: getField(row, ["SPV"]),
-      userId: getField(row, ["User ID", "USER ID", "user id"]),
-      name: getField(row, ["Canvasser Name", "Nama Sales", "canvasser name"]),
-      multipayment: toNumber(getField(row, ["Multipayment"])),
-      cash: toNumber(getField(row, ["Cash"])),
-      total: toNumber(getField(row, ["Total"])),
-      bca: toNumber(getField(row, ["BCA"])),
-      bri: toNumber(getField(row, ["BRI"])),
-      bundling: toNumber(getField(row, ["Bundling"])),
-      kblb: toNumber(getField(row, ["KB/LB", "KB / LB"])),
-    };
-    if (!rec.userId && !rec.name) continue;
-    if (!byDate[key]) byDate[key] = [];
-    byDate[key].push(rec);
+    if (!matchesCluster(row, clusterName)) continue;
+    const status = getField(row, ["Status Order", "status order"]);
+    if (String(status).trim().toLowerCase() !== "completed") continue;
+    const canvasserId = getField(row, ["Canvasser ID", "canvasser id"]);
+    const canvasserName = getField(row, ["Canvasser Name", "canvasser name"]);
+    if (!canvasserId && !canvasserName) continue;
+    const dt = parseAnyDate(getField(row, ["Last Update", "last update"]));
+    const productName = getField(row, ["Product Name/Denom", "Product Name", "product name"]) || "-";
+    const qty = toNumber(getField(row, ["Total Product", "total product"]));
+    const priceSum =
+      toNumber(getField(row, ["Product Price"])) +
+      toNumber(getField(row, ["Package Price"])) +
+      toNumber(getField(row, ["Markup Price"]));
+    const total = qty * priceSum;
+    const key = (canvasserId || canvasserName) + "|" + productName;
+    if (!map[key]) {
+      map[key] = {
+        canvasserId,
+        canvasserName,
+        productName,
+        lastDate: dt ? dateKey(dt) : "",
+        qty: 0,
+        total: 0,
+      };
+    }
+    map[key].qty += qty;
+    map[key].total += total;
+    if (dt) {
+      const dStr = dateKey(dt);
+      if (!map[key].lastDate || dStr > map[key].lastDate) map[key].lastDate = dStr;
+    }
   }
-  return byDate;
+  return map;
 }
 
-function aggregateSettlement(settlementByDate) {
-  const map = {};
-  Object.values(settlementByDate || {}).forEach((rows) => {
-    rows.forEach((r) => {
-      const key = (r.userId || "") + "|" + r.name;
-      if (!map[key]) {
-        map[key] = {
-          depo: r.depo,
-          spv: r.spv,
-          userId: r.userId,
-          name: r.name,
-          totalTagihan: 0,
-          totalBank: 0,
-        };
-      }
-      map[key].totalTagihan += r.total;
-      map[key].totalBank += r.bca + r.bri + r.bundling + r.kblb;
-    });
+function aggregateCanvasserSales(orderLogByCanvasser) {
+  const detail = [];
+  ["physical", "logical", "wg"].forEach((slot) => {
+    Object.values(orderLogByCanvasser?.[slot] || {}).forEach((item) => detail.push(item));
   });
-  return Object.values(map)
-    .map((s) => ({ ...s, selisih: s.totalBank - s.totalTagihan }))
-    .sort((a, b) => (a.depo || "").localeCompare(b.depo || "") || (a.name || "").localeCompare(b.name || ""));
+  const summaryMap = {};
+  detail.forEach((item) => {
+    const key = item.canvasserId || item.canvasserName;
+    if (!summaryMap[key]) {
+      summaryMap[key] = { canvasserId: item.canvasserId, canvasserName: item.canvasserName, totalSales: 0 };
+    }
+    summaryMap[key].totalSales += item.total;
+  });
+  const summary = Object.values(summaryMap).sort((a, b) => b.totalSales - a.totalSales);
+  const detailSorted = [...detail].sort(
+    (a, b) => (a.canvasserName || "").localeCompare(b.canvasserName || "") || (a.productName || "").localeCompare(b.productName || "")
+  );
+  return { summary, detail: detailSorted };
 }
 
 // ---------- config ----------
@@ -218,11 +233,10 @@ function computeOpeningTotal(opening) {
 function emptyCluster() {
   return {
     orderLog: { physical: {}, logical: {}, wg: {} },
+    orderLogByCanvasser: { physical: {}, logical: {}, wg: {} },
     orderLogFiles: {},
     banks: {},
     xendit: { byDate: {}, fileName: null, rowCount: 0 },
-    settlement: {},
-    settlementFile: null,
     manual: {},
     opening: emptyOpening(),
     activePeriod: null,
@@ -519,12 +533,22 @@ export default function ModalKerjaPrototype() {
       header: true,
       skipEmptyLines: true,
       complete: (res) => {
-        const byDate = parseOrderLog(res.data);
+        const byDate = parseOrderLog(res.data, activeCluster);
+        const byCanvasser = parseOrderLogByCanvasser(res.data, activeCluster);
+        const matchedCount = Object.values(byDate).length > 0 || Object.keys(byCanvasser).length > 0;
         updateCluster((c) => ({
           ...c,
           orderLog: { ...c.orderLog, [slotId]: byDate },
+          orderLogByCanvasser: { ...c.orderLogByCanvasser, [slotId]: byCanvasser },
           orderLogFiles: { ...c.orderLogFiles, [slotId]: { name: file.name, rows: res.data.length } },
         }));
+        if (!matchedCount && res.data.length > 0) {
+          setUploadSavedMsg(
+            'Tidak ada baris dengan kolom "Sales Cluster" = "' +
+              activeCluster +
+              '" di file ini — cek apakah file-nya untuk cluster yang benar.'
+          );
+        }
       },
     });
   }
@@ -550,23 +574,6 @@ export default function ModalKerjaPrototype() {
       complete: (res) => {
         const byDate = parseXendit(res.data);
         updateCluster((c) => ({ ...c, xendit: { byDate, fileName: file.name, rowCount: res.data.length } }));
-      },
-    });
-  }
-
-  function handleSettlementFile(file) {
-    Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: (res) => {
-        const byDate = parseSettlement(res.data);
-        // file settlement biasanya snapshot 1 hari — gabung ke tanggal yang sudah
-        // ada, jangan timpa tanggal lain yang sudah pernah diunggah sebelumnya.
-        updateCluster((c) => ({
-          ...c,
-          settlement: { ...c.settlement, ...byDate },
-          settlementFile: { name: file.name, rows: res.data.length },
-        }));
       },
     });
   }
@@ -782,19 +789,7 @@ export default function ModalKerjaPrototype() {
   });
 
   const bankList = Object.keys(cData.banks);
-  const settlementRows = aggregateSettlement(cData.settlement);
-  const settlementDetailRows = [];
-  Object.entries(cData.settlement || {}).forEach(([date, rows]) => {
-    if (rangeFrom && date < rangeFrom) return;
-    if (rangeTo && date > rangeTo) return;
-    rows.forEach((r) => {
-      const bankTotal = r.bca + r.bri + r.bundling + r.kblb;
-      settlementDetailRows.push({ date, ...r, bankTotal, selisih: bankTotal - r.total });
-    });
-  });
-  settlementDetailRows.sort(
-    (a, b) => a.date.localeCompare(b.date) || (a.depo || "").localeCompare(b.depo || "") || (a.name || "").localeCompare(b.name || "")
-  );
+  const canvasserSales = aggregateCanvasserSales(cData.orderLogByCanvasser);
 
   const rangeFilteredDates = calcDates.filter((d) => {
     if (rangeFrom && d < rangeFrom) return false;
@@ -1166,6 +1161,10 @@ export default function ModalKerjaPrototype() {
               )}
 
               <div className="mk-section-title">Order Log</div>
+              <div className="mk-upload-save-hint">
+                Otomatis difilter berdasarkan kolom "Sales Cluster" di file — hanya baris dengan Sales Cluster =
+                "{activeCluster}" yang dihitung, walau file-nya berisi banyak cluster sekaligus.
+              </div>
               <div className="mk-grid">
                 {ORDER_LOG_SLOTS.map((slot) => (
                   <UploadCard
@@ -1218,17 +1217,6 @@ export default function ModalKerjaPrototype() {
                   fileName={cData.xendit.fileName}
                   rowCount={cData.xendit.rowCount}
                   onFile={handleXenditFile}
-                />
-              </div>
-
-              <div className="mk-section-title">Detail Daily Settlement</div>
-              <div className="mk-grid">
-                <UploadCard
-                  title="Detail Daily Settlement per Sales"
-                  hint="Kolom wajib: Tanggal, Depo, SPV, User ID, Canvasser Name, Multipayment, Cash, Total, BCA, BRI, Bundling, KB/LB"
-                  fileName={cData.settlementFile?.name}
-                  rowCount={cData.settlementFile?.rows || 0}
-                  onFile={handleSettlementFile}
                 />
               </div>
 
@@ -1464,139 +1452,74 @@ export default function ModalKerjaPrototype() {
 
           {tab === "rekapSales" && (
             <div>
-              {settlementRows.length === 0 ? (
+              {canvasserSales.summary.length === 0 ? (
                 <div className="mk-empty">
-                  Belum ada data Detail Daily Settlement. Unggah lewat kartu "Detail Daily Settlement per Sales" di
-                  tab Unggah Data.
+                  Belum ada data. Rekap ini otomatis dari Order Log (Physical/Logical/WG) — hanya baris dengan
+                  Status Order "Completed" yang dihitung, dikelompokkan per Canvasser Name.
                 </div>
               ) : (
                 <>
-                  <div className="mk-section-title">Rekap per Sales — akumulasi semua tanggal yang diunggah</div>
+                  <div className="mk-section-title">
+                    Rekap Penjualan per Sales — dari Order Log (Status Order: Completed), semua tanggal yang
+                    diunggah
+                  </div>
+                  <div className="mk-upload-save-hint">
+                    Total penjualan = Total Product (qty) × (Product Price + Package Price + Markup Price), tanggal
+                    diambil dari kolom Last Update. Rekonsiliasi uang masuk vs omset tetap dilihat di level
+                    keseluruhan cluster pada tab Summary MK (Rekonsiliasi Omset vs Uang Masuk) — Mutasi Bank & Xendit
+                    tidak mencatat per-sales.
+                  </div>
                   <div className="mk-table-wrap">
                     <table className="mk-ledger">
                       <thead>
                         <tr>
-                          <th>Depo</th>
-                          <th>SPV</th>
-                          <th>User ID</th>
+                          <th>Canvasser ID</th>
                           <th>Nama Sales</th>
-                          <th>Total Tagihan</th>
-                          <th>Total Mutasi Bank</th>
-                          <th>Selisih</th>
-                          <th>Status</th>
+                          <th>Total Penjualan</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {settlementRows.map((s) => {
-                          const status = s.selisih === 0 ? "Lunas" : s.selisih > 0 ? "Lebih Setor" : "Kurang Setor";
-                          return (
-                            <tr key={s.userId + "|" + s.name} className="lrow">
-                              <td className="lr-label">{s.depo}</td>
-                              <td className="lr-val" style={{ textAlign: "left" }}>
-                                {s.spv}
-                              </td>
-                              <td className="lr-val" style={{ textAlign: "left" }}>
-                                {s.userId}
-                              </td>
-                              <td className="lr-val" style={{ textAlign: "left" }}>
-                                {s.name}
-                              </td>
-                              <td className="lr-val">{fmtRp(s.totalTagihan)}</td>
-                              <td className="lr-val">{fmtRp(s.totalBank)}</td>
-                              <td className={"lr-val " + (s.selisih < 0 ? "lr-neg" : s.selisih > 0 ? "lr-pos" : "")}>
-                                {fmtRp(s.selisih)}
-                              </td>
-                              <td className="lr-val">
-                                <span className={"mk-status-badge mk-status-" + status.replace(" ", "-").toLowerCase()}>
-                                  {status}
-                                </span>
-                              </td>
-                            </tr>
-                          );
-                        })}
+                        {canvasserSales.summary.map((s) => (
+                          <tr key={s.canvasserId + "|" + s.canvasserName} className="lrow">
+                            <td className="lr-label">{s.canvasserId}</td>
+                            <td className="lr-val" style={{ textAlign: "left" }}>
+                              {s.canvasserName}
+                            </td>
+                            <td className="lr-val">{fmtRp(s.totalSales)}</td>
+                          </tr>
+                        ))}
                       </tbody>
                     </table>
                   </div>
 
-                  <div className="mk-section-title">Detail Harian per Sales</div>
-                  <div className="mk-toolbar">
-                    <div className="mk-toolbar-range">
-                      <label>Dari</label>
-                      <input type="date" value={rangeFrom} onChange={(e) => setRangeFrom(e.target.value)} />
-                      <label>Sampai</label>
-                      <input type="date" value={rangeTo} onChange={(e) => setRangeTo(e.target.value)} />
-                      {(rangeFrom || rangeTo) && (
-                        <button
-                          className="mk-toolbar-reset"
-                          onClick={() => {
-                            setRangeFrom("");
-                            setRangeTo("");
-                          }}
-                        >
-                          Reset filter
-                        </button>
-                      )}
-                    </div>
-                    <span className="mk-toolbar-pager">{settlementDetailRows.length} baris</span>
-                  </div>
+                  <div className="mk-section-title">Detail per Sales per Produk</div>
                   <div className="mk-table-wrap">
                     <table className="mk-ledger">
                       <thead>
                         <tr>
-                          <th>Tanggal</th>
-                          <th>Depo</th>
-                          <th>SPV</th>
-                          <th>User ID</th>
                           <th>Nama Sales</th>
-                          <th>Multipayment</th>
-                          <th>Cash</th>
-                          <th>Total Tagihan</th>
-                          <th>BCA</th>
-                          <th>BRI</th>
-                          <th>Bundling</th>
-                          <th>KB/LB</th>
-                          <th>Total Bank</th>
-                          <th>Selisih</th>
-                          <th>Status</th>
+                          <th>Nama Produk</th>
+                          <th>Tanggal Terakhir</th>
+                          <th>Qty (Total Product)</th>
+                          <th>Harga Barang</th>
+                          <th>Total</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {settlementDetailRows.map((r, i) => {
-                          const status = r.selisih === 0 ? "Lunas" : r.selisih > 0 ? "Lebih Setor" : "Kurang Setor";
-                          return (
-                            <tr key={i} className="lrow">
-                              <td className="lr-label">{formatDateLabel(r.date)}</td>
-                              <td className="lr-val" style={{ textAlign: "left" }}>
-                                {r.depo}
-                              </td>
-                              <td className="lr-val" style={{ textAlign: "left" }}>
-                                {r.spv}
-                              </td>
-                              <td className="lr-val" style={{ textAlign: "left" }}>
-                                {r.userId}
-                              </td>
-                              <td className="lr-val" style={{ textAlign: "left" }}>
-                                {r.name}
-                              </td>
-                              <td className="lr-val">{fmtRp(r.multipayment)}</td>
-                              <td className="lr-val">{fmtRp(r.cash)}</td>
-                              <td className="lr-val">{fmtRp(r.total)}</td>
-                              <td className="lr-val">{fmtRp(r.bca)}</td>
-                              <td className="lr-val">{fmtRp(r.bri)}</td>
-                              <td className="lr-val">{fmtRp(r.bundling)}</td>
-                              <td className="lr-val">{fmtRp(r.kblb)}</td>
-                              <td className="lr-val">{fmtRp(r.bankTotal)}</td>
-                              <td className={"lr-val " + (r.selisih < 0 ? "lr-neg" : r.selisih > 0 ? "lr-pos" : "")}>
-                                {fmtRp(r.selisih)}
-                              </td>
-                              <td className="lr-val">
-                                <span className={"mk-status-badge mk-status-" + status.replace(" ", "-").toLowerCase()}>
-                                  {status}
-                                </span>
-                              </td>
-                            </tr>
-                          );
-                        })}
+                        {canvasserSales.detail.map((d, i) => (
+                          <tr key={i} className="lrow">
+                            <td className="lr-label" style={{ textAlign: "left" }}>
+                              {d.canvasserName}
+                            </td>
+                            <td className="lr-val" style={{ textAlign: "left" }}>
+                              {d.productName}
+                            </td>
+                            <td className="lr-val">{d.lastDate ? formatDateLabel(d.lastDate) : "-"}</td>
+                            <td className="lr-val">{d.qty.toLocaleString("id-ID")}</td>
+                            <td className="lr-val">{fmtRp(d.qty > 0 ? d.total / d.qty : 0)}</td>
+                            <td className="lr-val">{fmtRp(d.total)}</td>
+                          </tr>
+                        ))}
                       </tbody>
                     </table>
                   </div>
